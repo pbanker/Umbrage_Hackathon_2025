@@ -34,7 +34,7 @@ def startup_db_client():
         conn.commit()
     
     # Then create the tables
-    from app.models.models import SlideTemplate, SlideMetadata, Presentation, PresentationSlide  # Import models to register them
+    from app.models.models import SlideMetadata, PresentationMetadata  # Import models to register them
     Base.metadata.create_all(bind=engine)
 
 if __name__ == "__main__":

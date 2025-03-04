@@ -1,44 +1,202 @@
 from pptx import Presentation
 from copy import deepcopy
-import json
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER, MSO_SHAPE_TYPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.dml.color import RGBColor
 from pptx.util import Pt
-import os
 from datetime import datetime
+from typing import Union, Tuple, List, Dict, BinaryIO
+from sqlalchemy.orm import Session
+from app.models.models import SlideMetadata
+import shutil
+from pathlib import Path
+from pptx.shapes.placeholder import SlidePlaceholder
+import json
+from app.utils.openai import get_embedding
 
-def create_slide_schemas(template_path, output_folder=None):
+
+
+async def process_powerpoint_repository(
+    pptx_source: Union[str, BinaryIO, bytes],
+    db: Session,
+    source_type: str = "file_path"
+) -> Tuple[str, List[SlideMetadata]]:
     """
-    Create comprehensive schemas for all slides in a PowerPoint presentation.
+    Process a PowerPoint file and create SlideMetadata objects.
+    Stores the PowerPoint file in slides_storage directory.
     
     Args:
-        template_path (str): Path to the PowerPoint template file
-        output_folder (str, optional): Folder to save the schema. If None, schema is only returned
+        pptx_source: Can be either:
+            - file path (str)
+            - file-like object (BinaryIO from upload)
+            - bytes (from MS Graph API)
+        db: Session: SQLAlchemy database session
+        source_type: One of "file_path", "upload", or "ms_graph"
     
     Returns:
-        list: List of dictionaries containing slide schemas
+        Tuple containing:
+            - storage_path: Path where the presentation was stored
+            - List of SlideMetadata objects
     """
-    # Create output folder if specified and doesn't exist
-    if output_folder and not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+    # Create storage directory if it doesn't exist
+    storage_dir = Path("slides_repository")
+    storage_dir.mkdir(exist_ok=True)
     
-    # Load presentation
-    presentation = Presentation(template_path)
-    presentation_name = os.path.basename(template_path).split('.')[0]
+    # Generate unique filename using timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    storage_path = storage_dir / f"presentation_{timestamp}.pptx"
     
-    # Get presentation-level information
-    presentation_info = {
-        "presentation_name": presentation_name,
-        "slide_count": len(presentation.slides),
-        "created_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "slide_width": presentation.slide_width,
-        "slide_height": presentation.slide_height
+    # Handle different input types and save to storage
+    if source_type == "file_path":
+        shutil.copy2(pptx_source, storage_path)
+        presentation = Presentation(pptx_source)
+    elif source_type == "upload":
+        with open(storage_path, "wb") as f:
+            if hasattr(pptx_source, "seek"):
+                pptx_source.seek(0)
+            f.write(pptx_source.read())
+        presentation = Presentation(storage_path)
+    elif source_type == "ms_graph":
+        with open(storage_path, "wb") as f:
+            f.write(pptx_source)
+        presentation = Presentation(storage_path)
+    else:
+        raise ValueError("Invalid source_type. Must be 'file_path', 'upload', or 'ms_graph'")
+
+    # Create metadata objects for each slide
+    slide_metadata_objects = []
+    
+    for slide_idx, slide in enumerate(presentation.slides):
+        semantic_content = {
+            "title": _extract_slide_title(slide),
+            "purpose": _infer_slide_purpose(slide),
+            "category": _infer_slide_category(slide),
+            "tags": _generate_slide_tags(slide)
+        }
+        stringified_metadata = json.dumps(semantic_content)
+        embedding = await get_embedding(stringified_metadata)
+        
+        metadata = SlideMetadata(
+            title=semantic_content["title"],
+            category=semantic_content["category"],
+            slide_type=_infer_slide_type(slide),
+            purpose=semantic_content["purpose"],
+            tags=semantic_content["tags"],
+            audience=None,  # To be filled by user/AI later
+            sales_stage=None,  # To be filled by user/AI later
+            content_schema=_create_content_schema(slide),
+            embedding=embedding
+        )
+        
+        slide_metadata_objects.append(metadata)
+    
+    return str(storage_path), slide_metadata_objects
+
+def _extract_slide_title(slide) -> str:
+    """Extract the title from a slide"""
+    for shape in slide.shapes:
+        try:
+            # First check if it's a placeholder and if it's a title
+            if shape.is_placeholder and shape.placeholder_format.type == PP_PLACEHOLDER.TITLE:
+                if shape.has_text_frame:
+                    return shape.text_frame.text
+        except (AttributeError, ValueError):
+            # If it's not a placeholder, check if it might be a title shape by name
+            if hasattr(shape, 'name') and 'Title' in shape.name:
+                if shape.has_text_frame:
+                    return shape.text_frame.text
+    
+    return "Untitled Slide"
+
+def _infer_slide_category(slide) -> str:
+    """Infer the category of the slide based on its content"""
+    # Check for charts
+    if any(shape.shape_type == MSO_SHAPE_TYPE.CHART for shape in slide.shapes):
+        return "data_visualization"
+    
+    # Check for tables
+    if any(hasattr(shape, "table") for shape in slide.shapes):
+        return "data_presentation"
+    
+    # Check for multiple images
+    if sum(1 for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE) > 1:
+        return "visual"
+    
+    # Default to content slide
+    return "content"
+
+def _infer_slide_type(slide) -> str:
+    """Infer the specific type of slide based on its content and layout"""
+    layout_name = slide.slide_layout.name.lower()
+    
+    # Check layout name first
+    if "title" in layout_name:
+        if "content" in layout_name:
+            return "title_and_content"
+        return "title_slide"
+    
+    # Check content types
+    if any(shape.shape_type == MSO_SHAPE_TYPE.CHART for shape in slide.shapes):
+        return "chart_slide"
+    
+    if any(hasattr(shape, "table") for shape in slide.shapes):
+        return "table_slide"
+    
+    if any(shape.shape_type == MSO_SHAPE_TYPE.PICTURE for shape in slide.shapes):
+        return "image_slide"
+    
+    return "text_slide"
+
+def _infer_slide_purpose(slide) -> str:
+    """Infer the purpose of the slide based on its type and content"""
+    slide_type = _infer_slide_type(slide)
+    
+    # Basic mapping of slide types to purposes
+    purpose_map = {
+        "title_slide": "To introduce the presentation",
+        "chart_slide": "To visualize data or trends",
+        "table_slide": "To present structured data",
+        "image_slide": "To provide visual information",
+        "text_slide": "To convey textual information"
     }
     
-    # Create schema for each slide
-    slide_schemas = []
+    return purpose_map.get(slide_type, "To present information")
+
+def _generate_slide_tags(slide) -> List[str]:
+    """Generate relevant tags for the slide"""
+    tags = []
     
+    # Add layout-based tag
+    tags.append(slide.slide_layout.name.lower())
+    
+    # Add content-type based tags
+    content_types = set()
+    
+    for shape in slide.shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.CHART:
+            content_types.add("chart")
+        elif hasattr(shape, "table"):
+            content_types.add("table")
+        elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            content_types.add("picture")
+        elif shape.has_text_frame:
+            content_types.add("text")
+    
+    tags.extend(list(content_types))
+    
+    return tags
+
+#TODO: This is a placeholder function to create a content object/schema for the slides.
+def _create_content_schema(slide) -> Dict:
+    """
+    Create comprehensive content object for a given slide.
+    
+    Args:
+        slide (Slide): The slide to create a content object for
+    
+    Returns:
+        dict: Dictionary containing the content object for the slide
+    """
     # Get placeholder type names for better readability
     placeholder_types = {
         getattr(PP_PLACEHOLDER, attr): attr 
@@ -53,179 +211,265 @@ def create_slide_schemas(template_path, output_folder=None):
         if not attr.startswith('__')
     }
     
-    for slide_index, slide in enumerate(presentation.slides):
-        # Basic slide information
-        schema = {
-            "slide_index": slide_index,
-            "slide_id": slide.slide_id,
-            "slide_number": slide_index + 1,
-            "layout_name": slide.slide_layout.name,
-            "layout_index": slide.slide_layout.index,
-            "elements": []
+    # Basic slide information
+    schema = {
+        "slide_id": slide.slide_id,
+        "layout_name": slide.slide_layout.name,
+        "elements": []
+    }
+    
+    # Process all shapes on the slide
+    for shape in slide.shapes:
+        # Base shape information
+        element = {
+            "id": shape.shape_id,
+            "name": shape.name,
+            "shape_type": shape_types.get(shape.shape_type, str(shape.shape_type)),
+            "position": {
+                "x": shape.left,
+                "y": shape.top,
+                "width": shape.width,
+                "height": shape.height,
+                "rotation": shape.rotation
+            }
         }
         
-        # Process all shapes on the slide
-        for shape in slide.shapes:
-            # Base shape information
-            element = {
-                "id": shape.shape_id,
-                "name": shape.name,
-                "shape_type": shape_types.get(shape.shape_type, str(shape.shape_type)),
-                "position": {
-                    "x": shape.left,
-                    "y": shape.top,
-                    "width": shape.width,
-                    "height": shape.height,
-                    "rotation": shape.rotation
-                }
-            }
-            
-            # Add placeholder information if applicable
-            if hasattr(shape, 'placeholder_format') and shape.is_placeholder:
+        # Add placeholder information if applicable
+        try:
+            if shape.is_placeholder:
                 element["is_placeholder"] = True
                 placeholder_type = shape.placeholder_format.type
                 element["placeholder_type"] = placeholder_types.get(placeholder_type, str(placeholder_type))
                 element["placeholder_idx"] = shape.placeholder_format.idx
             else:
                 element["is_placeholder"] = False
+        except (AttributeError, ValueError):
+            element["is_placeholder"] = False
+        
+        # Text content
+        if shape.has_text_frame:
+            element["content_type"] = "text"
             
-            # Text content
-            if shape.has_text_frame:
-                element["content_type"] = "text"
+            # Get text and formatting at paragraph level
+            paragraphs_data = []
+            for p in shape.text_frame.paragraphs:
+                paragraph_data = {
+                    "text": p.text,
+                    "level": p.level,
+                    "alignment": str(p.alignment) if hasattr(p, 'alignment') else None,
+                    "runs": []
+                }
                 
-                # Get text and formatting at paragraph level
-                paragraphs_data = []
-                for p in shape.text_frame.paragraphs:
-                    paragraph_data = {
-                        "text": p.text,
-                        "level": p.level,
-                        "alignment": str(p.alignment) if hasattr(p, 'alignment') else None,
-                        "runs": []
+                # Get formatting for each text run
+                for run in p.runs:
+                    run_data = {
+                        "text": run.text,
+                        "font": {
+                            "name": run.font.name,
+                            "size": run.font.size.pt if hasattr(run.font.size, 'pt') else None,
+                            "bold": run.font.bold,
+                            "italic": run.font.italic,
+                            "underline": run.font.underline,
+                            "color": str(run.font.color.rgb) if hasattr(run.font.color, 'rgb') and run.font.color.rgb else None
+                        }
                     }
-                    
-                    # Get formatting for each text run
-                    for run in p.runs:
-                        run_data = {
-                            "text": run.text,
-                            "font": {
-                                "name": run.font.name,
-                                "size": run.font.size.pt if hasattr(run.font.size, 'pt') else None,
-                                "bold": run.font.bold,
-                                "italic": run.font.italic,
-                                "underline": run.font.underline,
-                                "color": str(run.font.color.rgb) if hasattr(run.font.color, 'rgb') and run.font.color.rgb else None
-                            }
-                        }
-                        paragraph_data["runs"].append(run_data)
-                    
-                    paragraphs_data.append(paragraph_data)
+                    paragraph_data["runs"].append(run_data)
                 
-                element["paragraphs"] = paragraphs_data
-                element["has_text_linking"] = shape.text_frame.auto_size
-                element["word_wrap"] = shape.text_frame.word_wrap
-                element["vertical_anchor"] = str(shape.text_frame.vertical_anchor) if hasattr(shape.text_frame, 'vertical_anchor') else None
+                paragraphs_data.append(paragraph_data)
             
-            # Table content
-            elif hasattr(shape, 'table'):
-                element["content_type"] = "table"
-                table_data = []
-                
-                for r_idx, row in enumerate(shape.table.rows):
-                    row_data = []
-                    for c_idx, cell in enumerate(row.cells):
-                        cell_data = {
-                            "text": cell.text,
-                            "row_idx": r_idx,
-                            "col_idx": c_idx,
-                            "row_span": cell.span.row_span,
-                            "col_span": cell.span.col_span,
-                            "width": cell.width,
-                            "height": cell.height
-                        }
-                        row_data.append(cell_data)
-                    table_data.append(row_data)
-                
-                element["table_data"] = table_data
-                element["row_count"] = len(shape.table.rows)
-                element["column_count"] = len(shape.table.columns)
-            
-            # Chart content
-            elif hasattr(shape, 'chart'):
-                element["content_type"] = "chart"
-                element["chart_type"] = str(shape.chart.chart_type)
-                
-                # Extract categories and series
-                if hasattr(shape.chart, 'plots') and shape.chart.plots:
-                    plot = shape.chart.plots[0]
-                    
-                    # Try to get categories
-                    categories = []
-                    if hasattr(plot, 'categories') and plot.categories:
-                        for category in plot.categories:
-                            categories.append(str(category.label))
-                    element["categories"] = categories
-                    
-                    # Try to get series
-                    series_data = []
-                    if hasattr(plot, 'series'):
-                        for series in plot.series:
-                            series_info = {
-                                "name": series.name if hasattr(series, 'name') else "Unknown",
-                                "values": list(series.values) if hasattr(series, 'values') else []
-                            }
-                            series_data.append(series_info)
-                    element["series"] = series_data
-                
-                element["has_title"] = shape.chart.has_title
-                if shape.chart.has_title:
-                    element["title"] = shape.chart.chart_title.text_frame.text
-            
-            # Picture content
-            elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                element["content_type"] = "picture"
-                if hasattr(shape, 'image'):
-                    element["image_filename"] = shape.image.filename if hasattr(shape.image, 'filename') else None
-                    element["image_format"] = shape.image.ext if hasattr(shape.image, 'ext') else None
-                    element["content_type"] = f"image/{shape.image.ext}" if hasattr(shape.image, 'ext') else "image"
-            
-            # Shape content
-            else:
-                element["content_type"] = "shape"
-                if hasattr(shape, 'fill'):
-                    element["fill_type"] = str(shape.fill.type) if hasattr(shape.fill, 'type') else None
-                    if hasattr(shape.fill, 'fore_color') and shape.fill.fore_color:
-                        element["fill_color"] = str(shape.fill.fore_color.rgb) if hasattr(shape.fill.fore_color, 'rgb') else None
-            
-            # Add this element to the slide schema
-            schema["elements"].append(element)
+            element["paragraphs"] = paragraphs_data
+            element["has_text_linking"] = shape.text_frame.auto_size
+            element["word_wrap"] = shape.text_frame.word_wrap
+            element["vertical_anchor"] = str(shape.text_frame.vertical_anchor) if hasattr(shape.text_frame, 'vertical_anchor') else None
         
-        # Add background information
+        # Table content
+        elif hasattr(shape, 'table'):
+            element["content_type"] = "table"
+            table_data = []
+            
+            for r_idx, row in enumerate(shape.table.rows):
+                row_data = []
+                for c_idx, cell in enumerate(row.cells):
+                    cell_data = {
+                        "text": cell.text,
+                        "row_idx": r_idx,
+                        "col_idx": c_idx,
+                        "row_span": cell.span.row_span,
+                        "col_span": cell.span.col_span,
+                        "width": cell.width,
+                        "height": cell.height
+                    }
+                    row_data.append(cell_data)
+                table_data.append(row_data)
+            
+            element["table_data"] = table_data
+            element["row_count"] = len(shape.table.rows)
+            element["column_count"] = len(shape.table.columns)
+        
+        # Chart content
+        elif hasattr(shape, 'chart'):
+            element["content_type"] = "chart"
+            element["chart_type"] = str(shape.chart.chart_type)
+            
+            # Extract categories and series
+            if hasattr(shape.chart, 'plots') and shape.chart.plots:
+                plot = shape.chart.plots[0]
+                
+                # Try to get categories
+                categories = []
+                if hasattr(plot, 'categories') and plot.categories:
+                    for category in plot.categories:
+                        categories.append(str(category.label))
+                element["categories"] = categories
+                
+                # Try to get series
+                series_data = []
+                if hasattr(plot, 'series'):
+                    for series in plot.series:
+                        series_info = {
+                            "name": series.name if hasattr(series, 'name') else "Unknown",
+                            "values": list(series.values) if hasattr(series, 'values') else []
+                        }
+                        series_data.append(series_info)
+                element["series"] = series_data
+            
+            element["has_title"] = shape.chart.has_title
+            if shape.chart.has_title:
+                element["title"] = shape.chart.chart_title.text_frame.text
+        
+        # Picture content
+        elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            element["content_type"] = "picture"
+            if hasattr(shape, 'image'):
+                element["image_filename"] = shape.image.filename if hasattr(shape.image, 'filename') else None
+                element["image_format"] = shape.image.ext if hasattr(shape.image, 'ext') else None
+                element["content_type"] = f"image/{shape.image.ext}" if hasattr(shape.image, 'ext') else "image"
+        
+        # Shape content
+        else:
+            element["content_type"] = "shape"
+            if hasattr(shape, 'fill'):
+                element["fill_type"] = str(shape.fill.type) if hasattr(shape.fill, 'type') else None
+                if hasattr(shape.fill, 'fore_color') and shape.fill.fore_color:
+                    element["fill_color"] = str(shape.fill.fore_color.rgb) if hasattr(shape.fill.fore_color, 'rgb') else None
+        
+        # Add this element to the slide schema
+        schema["elements"].append(element)
+    
+    # Add background information
+    try:
         if hasattr(slide, 'background') and slide.background:
-            if hasattr(slide.background.fill, 'type'):
-                schema["background_fill_type"] = str(slide.background.fill.type)
-                if hasattr(slide.background.fill, 'fore_color') and slide.background.fill.fore_color:
-                    schema["background_color"] = str(slide.background.fill.fore_color.rgb) if hasattr(slide.background.fill.fore_color, 'rgb') else None
-        
-        # Add the slide schema to our collection
-        slide_schemas.append(schema)
+            if hasattr(slide.background, 'fill'):
+                fill_type = type(slide.background.fill._fill).__name__
+                schema["background_fill_type"] = fill_type
+                
+                # Only try to get fore_color if it's a solid fill
+                if fill_type == "SolidFill" and hasattr(slide.background.fill, 'fore_color'):
+                    if slide.background.fill.fore_color and hasattr(slide.background.fill.fore_color, 'rgb'):
+                        schema["background_color"] = str(slide.background.fill.fore_color.rgb)
+    except (AttributeError, TypeError):
+        # If anything goes wrong with background processing, just skip it
+        pass
     
-    # Create the full schema with metadata
-    full_schema = {
-        "presentation_info": presentation_info,
-        "slides": slide_schemas
-    }
+    return schema
+
+
+
+def construct_presentation(template_path, output_path, slide_data):
+    """
+    Copy selected slides from a template presentation, insert/modify content of the slides based the slide_data, and create a new presentation.
     
-    # Save schema if output folder is specified
-    if output_folder:
-        schema_filename = f"{presentation_name}_schema.json"
-        schema_path = os.path.join(output_folder, schema_filename)
-        
-        with open(schema_path, 'w', encoding='utf-8') as f:
-            json.dump(full_schema, f, indent=2, ensure_ascii=False)
-        
-        print(f"Schema saved to {schema_path}")
+    Args:
+        template_path (str): Path to the template presentation
+        output_path (str): Path where the new presentation will be saved
+        slide_data (list): List of dictionaries with slide_id and content to be updated
+                          Example: [
+                              {
+                                  "slide_id": 5,  # slide number or some identifier
+                                  "content": {
+                                      "title": "New Title",
+                                      "subtitle": "New Subtitle",
+                                      "body": "New content for body placeholder"
+                                  }
+                              },
+                              ...
+                          ]
+    """
+    # Load the template presentation
+    template_pres = Presentation(template_path)
     
-    return full_schema
+    # Create a new presentation to hold the copied slides
+    new_pres = Presentation()
+    
+    # Create a mapping of placeholder types to their names for easier identification
+    placeholder_types = {getattr(PP_PLACEHOLDER, attr): attr 
+                        for attr in dir(PP_PLACEHOLDER) 
+                        if not attr.startswith('__')}
+    
+    # Map slide IDs to their indices for easier lookup
+    # Note: If slide_id in your data is actual slide index, this step isn't necessary
+    slide_map = {i: slide for i, slide in enumerate(template_pres.slides)}
+    
+    # Process each slide in the slide_data
+    for slide_item in slide_data:
+        slide_id = slide_item["slide_id"]
+        content = slide_item["content"]
+        
+        # Get the template slide (assuming slide_id is the index; adjust if needed)
+        if slide_id not in slide_map:
+            print(f"Warning: Slide ID {slide_id} not found in template presentation")
+            continue
+            
+        template_slide = slide_map[slide_id]
+        
+        # Create a blank slide in the new presentation with the same layout
+        layout = template_slide.slide_layout
+        new_slide = new_pres.slides.add_slide(layout)
+        
+        # Copy and modify each shape from the template slide
+        for shape in template_slide.shapes:
+            # If it's a placeholder that needs content update
+            if hasattr(shape, "placeholder_format") and isinstance(shape, SlidePlaceholder):
+                # Get placeholder type
+                ph_type = shape.placeholder_format.type
+                ph_type_name = placeholder_types.get(ph_type, "UNKNOWN")
+                
+                # Find the corresponding placeholder in the new slide
+                for new_shape in new_slide.shapes:
+                    if (hasattr(new_shape, "placeholder_format") and 
+                        new_shape.placeholder_format.type == ph_type):
+                        
+                        # Update placeholder content if it exists in our content dictionary
+                        # Convert placeholder type to lowercase for key matching
+                        content_key = ph_type_name.lower()
+                        
+                        # Allow flexible key matching
+                        matched_key = None
+                        if content_key in content:
+                            matched_key = content_key
+                        elif shape.name.lower() in content:
+                            matched_key = shape.name.lower()
+                        elif "title" in content_key and "title" in content:
+                            matched_key = "title"
+                        elif "subtitle" in content_key and "subtitle" in content:
+                            matched_key = "subtitle"
+                        elif "body" in content_key and "body" in content:
+                            matched_key = "body"
+                        
+                        if matched_key:
+                            if hasattr(new_shape, "text_frame"):
+                                new_shape.text_frame.text = content[matched_key]
+                            elif hasattr(new_shape, "text"):
+                                new_shape.text = content[matched_key]
+            
+            # Process other shape types as needed
+            # (For images, tables, charts, etc., you would need more complex logic)
+    
+    # Save the new presentation
+    new_pres.save(output_path)
+    return new_pres
+
+
 
 def duplicate_slide_object(slide):
     """

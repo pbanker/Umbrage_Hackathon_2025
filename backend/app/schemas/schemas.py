@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 class SlideMetadataBase(BaseModel):
+    title: Optional[str] = None
     category: Optional[str] = None
     slide_type: Optional[str] = None
     purpose: Optional[str] = None
@@ -12,7 +13,8 @@ class SlideMetadataBase(BaseModel):
     content_schema: Optional[Dict[str, Any]] = None
 
 class SlideMetadataUpdate(SlideMetadataBase):
-    pass
+    class Config:
+        exclude = {'content_schema'}
 
 class SlideMetadata(SlideMetadataBase):
     id: int
