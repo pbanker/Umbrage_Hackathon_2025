@@ -10,13 +10,8 @@ services:
       - ./backend:/app
     depends_on:
       - db
-    environment:
-      - DATABASE_URI=postgresql://postgres:postgres@db:5432/myapp
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - API_PREFIX=/api/v1
-      - DEBUG=True
-      - SECRET_KEY=${SECRET_KEY:-default-secret-key}
-    # Simplified command - just start the app without migrations initially
+    env_file:
+      - ./backend/.env
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     restart: always
     networks:
