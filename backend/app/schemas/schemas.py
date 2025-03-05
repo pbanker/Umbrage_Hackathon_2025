@@ -2,6 +2,16 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+class PresentationMetadataBase(BaseModel):
+    title: str
+    storage_path: str
+    number_of_slides: int
+    image_path: Optional[str] = None
+
+class PresentationMetadata(PresentationMetadataBase):
+    id: int
+    created_at: datetime
+
 class SlideMetadataBase(BaseModel):
     title: Optional[str] = None
     category: Optional[str] = None
@@ -19,6 +29,10 @@ class SlideMetadataUpdate(SlideMetadataBase):
 class SlideMetadata(SlideMetadataBase):
     id: int
     slide_id: int
+    presentation_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    image_path: Optional[str] = None
 
     class Config:
         from_attributes = True

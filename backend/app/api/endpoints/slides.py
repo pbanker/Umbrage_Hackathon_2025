@@ -10,7 +10,7 @@ import json
 
 router = APIRouter()
 
-@router.post("/slides/repository/upload")
+@router.post("/repository/upload")
 async def upload_slide_repository(
     file: UploadFile = File(...),
     title: str | None = Form(None),
@@ -47,6 +47,27 @@ async def upload_slide_repository(
         "storage_path": storage_path,
         "presentation_id": presentation.id
     }
+
+
+
+@router.get("/repository/metadata", response_model=List[schemas.PresentationMetadata])
+async def get_all_presentation_metadata(
+    db: Session = Depends(get_db)
+):
+    """Get all presentation metadata"""
+    presentations = db.query(PresentationMetadata).all()
+    return presentations
+
+
+
+@router.get("/repository/metadata/{presentation_id}", response_model=schemas.PresentationMetadata)
+async def get_presentation_metadata(
+    presentation_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get presentation metadata"""
+    presentation = db.query(PresentationMetadata).filter(PresentationMetadata.id == presentation_id).first()
+    return presentation
 
 
 
