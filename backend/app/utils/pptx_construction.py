@@ -1,4 +1,5 @@
 from typing import List
+from fastapi import HTTPException
 from pptx import Presentation
 from copy import deepcopy
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER, MSO_SHAPE_TYPE
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 import json
 import numpy as np
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -474,3 +476,56 @@ async def generate_slide_content(
                     raise ValueError(f"Failed to generate valid JSON for slide {slide.id} after {max_retries} attempts")
     
     return slide_content_list
+
+
+def modify_ppt_text(file_path, replacements, output_path):
+    """
+    Modifies text in a PowerPoint file while preserving formatting and handling multi-run text issues.
+
+    :param file_path: Path to the original PowerPoint file.
+    :param replacements: Dictionary mapping old text to new text.
+    :param output_path: Path to save the modified PowerPoint.
+    :return: Success or error message.
+    """
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    prs = Presentation(file_path)
+    modified = False  # Track if changes were made
+
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text_frame") and shape.text_frame is not None:
+                for paragraph in shape.text_frame.paragraphs:
+                    full_text = paragraph.text.strip()  # Extract full text from paragraph
+
+                    # Check if the entire text matches a replacement
+                    if full_text in replacements:
+                        new_text = replacements[full_text]  # Get new text
+                        runs = paragraph.runs  # Get original text runs
+                        print(runs)
+
+                        if len(runs) == 1:
+                            print(f'single replacement: original {runs[0].text}')
+                            # Simple case: Only one run, replace it directly
+                            runs[0].text = new_text
+                            print(f'replace text {runs[0].text}')
+                        else:
+                            # Complex case: Multiple runs, preserve formatting while replacing text
+                            first_run = runs[0]  # Store first run for formatting reference
+
+                            # Clear all runs except the first one
+                            for run in runs:
+                                print(f"Run Text Before: '{run.text}', Font: {run.font.name}, Size: {run.font.size}, Bold: {run.font.bold}, Italic: {run.font.italic}")
+                                run.text = ""
+
+                            # Apply new text while keeping first run’s formatting
+                            first_run.text = new_text
+                            
+                        modified = True  # Mark as modified
+
+    if modified:
+        prs.save(output_path)
+        return {"message": f"Modified PowerPoint saved as: {output_path}"}
+    else:
+        return {"message": "No matching text found to replace."}

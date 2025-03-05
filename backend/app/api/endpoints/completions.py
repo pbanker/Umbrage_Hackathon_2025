@@ -1,13 +1,15 @@
 from app.schemas import schemas
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 from app.database  import get_db
 from app.models.models import PresentationMetadata
-from app.utils.pptx_construction import construct_presentation, generate_presentation_outline, find_matching_slides, generate_slide_content
+from app.utils.pptx_construction import construct_presentation, generate_presentation_outline, find_matching_slides, generate_slide_content, modify_ppt_text
 from pathlib import Path
 from datetime import datetime
 import logging
 import json
+import shutil
+import os
 
 # Set up logging
 log_dir = Path("logs")
@@ -97,3 +99,40 @@ async def generate_presentation(
     except Exception as e:
         logger.error(f"Error generating presentation: {str(e)}", exc_info=True)
         raise
+    
+@router.post("/completions/modify_pptx_slide")
+async def modify_ppt(
+    file: UploadFile = File(...),
+    replacements: str = Form(...),
+    output_path: str = Form(...)
+):
+    """
+    API Endpoint to modify PowerPoint text.
+    Requires a file upload and JSON-formatted replacements.
+    """
+    if not file.filename.endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="Only PPTX files are supported.")
+    
+    UPLOAD_DIR = "uploads"
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    result = None
+
+    try:
+        replacements_dict = json.loads(replacements)
+        result = modify_ppt_text(file_path, replacements_dict, output_path)
+
+    except Exception as e:
+         HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        os.remove(file_path)
+        try:
+            os.rmdir(UPLOAD_DIR) 
+        except OSError:
+            pass 
+
+    return result
