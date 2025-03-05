@@ -8,6 +8,7 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import json
+from fastapi.responses import FileResponse
 
 # Set up logging
 log_dir = Path("logs")
@@ -30,7 +31,7 @@ logger.addHandler(file_handler)
 
 router = APIRouter()
 
-@router.post("/completions/generate-presentation", response_model=schemas.PresentationWithSlides)
+@router.post("/completions/generate-presentation")
 async def generate_presentation(
     input_data: schemas.PresentationInput,
     db: Session = Depends(get_db)
@@ -81,18 +82,13 @@ async def generate_presentation(
         )
         logger.info("Presentation construction complete")
         
-        # 8. Create and return presentation object
-        response = {
-            "id": 0,  # You might want to save this to the database and get a real ID
-            "title": input_data.title,
-            "client_name": input_data.client_name,
-            "industry": input_data.industry,
-            "outline": {"sections": [s.dict() for s in outline]},
-            "created_at": datetime.now(),
-            "slides": slide_content
-        }
-        logger.info("Presentation generation completed successfully")
-        return response
+        # Instead of just returning the response object,
+        # return the file with appropriate headers
+        return FileResponse(
+            path=str(output_path),
+            filename=f"{input_data.title.replace(' ', '_')}.pptx",
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
         
     except Exception as e:
         logger.error(f"Error generating presentation: {str(e)}", exc_info=True)
