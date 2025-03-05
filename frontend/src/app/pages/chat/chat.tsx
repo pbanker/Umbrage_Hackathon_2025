@@ -33,7 +33,7 @@ const ChatPage: React.FC = () => {
             </div>
           </div>
           <img
-            className="w-6 h-6"
+            className="w-6 h-6 cursor-pointer"
             src="/icons/more-vertical.svg"
             alt=""
             onClick={() => setSettingsVisible(!settingsVisible)}
@@ -46,9 +46,11 @@ const ChatPage: React.FC = () => {
           <div className="flex flex-col gap-2.5">
             <textarea
               placeholder="Type your message..."
-              className="flex-grow p-2 border rounded mr-2"
+              className="flex-grow p-2 border rounded-lg mr-2"
             ></textarea>
-            <button className="p-2 bg-blue-500 text-white rounded">Send</button>
+            <button className="p-2 bg-blue-500 text-white rounded-lg">
+              Send
+            </button>
           </div>
         </div>
       </div>
