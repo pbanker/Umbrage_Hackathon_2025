@@ -9,7 +9,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libpq-dev \
+    && apt-get install -y --no-install-recommends \
+        gcc \
+        libpq-dev \
+        poppler-utils \
+        libreoffice \
+        libreoffice-writer \
+        default-jre \
+        fonts-liberation \
+        fonts-liberation2 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -21,8 +29,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy project
 COPY . .
 
+# Make cleanup script executable
+RUN chmod 755 scripts/cleanup.sh
+
 # Expose port
 EXPOSE 8000
 
-# Run the application
+# Default command (can be overridden by docker-compose)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
