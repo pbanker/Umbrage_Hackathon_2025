@@ -8,6 +8,10 @@ import shutil
 from pathlib import Path
 import json
 from app.utils.openai import get_embedding
+import uuid
+from pdf2image import convert_from_path
+import tempfile
+import subprocess
 
 
 
@@ -15,7 +19,7 @@ async def process_powerpoint_repository(
     pptx_source: Union[str, BinaryIO, bytes],
     db: Session,
     source_type: str = "file_path"
-) -> Tuple[str, List[SlideMetadata]]:
+) -> Tuple[str, List[SlideMetadata], List[str]]:
     """
     Process a PowerPoint file and create SlideMetadata objects.
     Stores the PowerPoint file in slides_storage directory.
@@ -32,6 +36,7 @@ async def process_powerpoint_repository(
         Tuple containing:
             - storage_path: Path where the presentation was stored
             - List of SlideMetadata objects
+            - List of image paths
     """
     # Create storage directory if it doesn't exist
     storage_dir = Path("slides_repository")
@@ -58,10 +63,13 @@ async def process_powerpoint_repository(
     else:
         raise ValueError("Invalid source_type. Must be 'file_path', 'upload', or 'ms_graph'")
 
+    # After saving the file, generate images
+    image_paths = _save_slides_as_images(str(storage_path))
+    
     # Create metadata objects for each slide
     slide_metadata_objects = []
     
-    for slide_idx, slide in enumerate(presentation.slides):
+    for slide_idx, (slide, image_path) in enumerate(zip(presentation.slides, image_paths)):
         semantic_content = {
             "title": _extract_slide_title(slide),
             "purpose": _infer_slide_purpose(slide),
@@ -80,12 +88,13 @@ async def process_powerpoint_repository(
             audience=None,  # To be filled by user/AI later
             sales_stage=None,  # To be filled by user/AI later
             content_mapping=_create_content_mapping(slide),
-            embedding=embedding
+            embedding=embedding,
+            image_path=image_path  # Add the image path
         )
         
         slide_metadata_objects.append(metadata)
     
-    return str(storage_path), slide_metadata_objects
+    return str(storage_path), slide_metadata_objects, image_paths
 
 def _extract_slide_title(slide) -> str:
     """Extract the title from a slide"""
@@ -365,3 +374,74 @@ def _create_content_mapping(slide) -> Dict:
         pass
     
     return schema
+
+def _save_slides_as_images(pptx_path: str) -> list[str]:
+    """
+    Convert each slide in the PowerPoint to an image and save it.
+    Uses LibreOffice to convert to PDF first, then pdf2image to convert to images.
+    """
+    # Create images directory if it doesn't exist
+    images_dir = Path("images")
+    images_dir.mkdir(exist_ok=True)
+    
+    # Create a temporary directory for the PDF
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        pdf_path = temp_dir_path / "slides.pdf"
+        
+        # Convert PPTX to PDF using LibreOffice
+        try:
+            # Get absolute paths
+            pptx_abs_path = str(Path(pptx_path).absolute())
+            temp_dir_abs_path = str(temp_dir_path.absolute())
+            
+            # Try using libreoffice with absolute paths
+            result = subprocess.run([
+                'libreoffice',
+                '--headless',
+                '--convert-to', 'pdf',
+                '--outdir', temp_dir_abs_path,
+                pptx_abs_path
+            ], capture_output=True, text=True, check=False)
+            
+            if result.returncode != 0:
+                print(f"LibreOffice Error: {result.stderr}")
+                # Try soffice as fallback
+                result = subprocess.run([
+                    'soffice',
+                    '--headless',
+                    '--convert-to', 'pdf',
+                    '--outdir', temp_dir_abs_path,
+                    pptx_abs_path
+                ], capture_output=True, text=True, check=False)
+                
+                if result.returncode != 0:
+                    print(f"Soffice Error: {result.stderr}")
+                    raise RuntimeError(
+                        f"Failed to convert PPTX to PDF. LibreOffice/Soffice error: {result.stderr}"
+                    )
+            
+            # Verify PDF was created
+            expected_pdf = temp_dir_path / Path(pptx_path).with_suffix('.pdf').name
+            if not expected_pdf.exists():
+                raise RuntimeError(f"PDF file not created at expected location: {expected_pdf}")
+            
+            # Move the PDF to the expected location
+            shutil.move(str(expected_pdf), str(pdf_path))
+            
+            # Convert PDF to images
+            images = convert_from_path(str(pdf_path))
+            image_paths = []
+            
+            # Save each image
+            for i, image in enumerate(images):
+                image_filename = f"slide_{uuid.uuid4()}.jpg"
+                image_path = images_dir / image_filename
+                image.save(str(image_path), "JPEG")
+                image_paths.append(str(image_path))
+            
+            return image_paths
+            
+        except Exception as e:
+            print(f"Error during conversion: {str(e)}")
+            raise RuntimeError(f"Failed to process slides: {str(e)}")

@@ -19,6 +19,7 @@ class SlideMetadata(Base):
     audience = Column(String) # i.e. "engineering team"
     sales_stage = Column(String) # i.e. "discovery"
     embedding = Column(Vector(1536))  # OpenAI embedding for semantic search
+    image_path = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -32,6 +33,8 @@ class PresentationMetadata(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String)
     storage_path = Column(String)
+    number_of_slides = Column(Integer)
+    image_path = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     slides = relationship("SlideMetadata", back_populates="presentation", cascade="all, delete-orphan")

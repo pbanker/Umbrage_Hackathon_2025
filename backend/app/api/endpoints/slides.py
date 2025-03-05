@@ -18,7 +18,7 @@ async def upload_slide_repository(
 ):
     """Upload a PowerPoint file to create/update the slide repository and presentation metadata as well as the slide metadata, embedding of metadata, and content schema"""
 
-    storage_path, slide_metadata_objects = await process_powerpoint_repository(
+    storage_path, slide_metadata_objects, image_paths = await process_powerpoint_repository(
         file.file, 
         db, 
         source_type="upload"
@@ -26,7 +26,12 @@ async def upload_slide_repository(
 
     # Create presentation metadata
     presentation_title = title or "Untitled Slide Repository"
-    presentation = PresentationMetadata(storage_path=storage_path, title=presentation_title)
+    presentation = PresentationMetadata(
+        storage_path=storage_path,
+        title=presentation_title,
+        number_of_slides=len(slide_metadata_objects),
+        image_path=image_paths[0] if image_paths else None  # Use first slide's image
+    )
     db.add(presentation)
     db.flush()
     
