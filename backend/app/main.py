@@ -1,19 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.config import settings
 from app.api import api_router
 from app.database import engine, Base
 
-# Initialize FastAPI application
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="FastAPI application with PostgreSQL, pgvector, and OpenAI integration",
     version="0.1.0",
 )
 
-# Configure CORS
+app.mount("/images", StaticFiles(directory="images"), name="images")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,19 +23,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API router
 app.include_router(api_router, prefix=settings.API_PREFIX)
 
-# Startup event to initialize database
 @app.on_event("startup")
 def startup_db_client():
-    # First, create the pgvector extension
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         conn.commit()
     
-    # Then create the tables
-    from app.models.models import SlideMetadata, PresentationMetadata  # Import models to register them
+    from app.models.models import SlideMetadata, PresentationMetadata
     Base.metadata.create_all(bind=engine)
 
 if __name__ == "__main__":
