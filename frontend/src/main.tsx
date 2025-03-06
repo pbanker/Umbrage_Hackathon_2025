@@ -7,10 +7,10 @@ import { Toaster } from "@/components/ui/sonner"
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <main className="h-screen w-screen bg-gray-100">
-      <div className="flex flex-col h-full w-6xl mx-auto">
+    <main className=" bg-gray-100">
+      <div className="flex flex-col h-full w-4xl mx-auto">
         <App />
-        <Toaster />
+        <Toaster richColors/>
       </div>
     </main>
   </StrictMode>,

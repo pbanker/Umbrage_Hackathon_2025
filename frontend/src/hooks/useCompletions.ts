@@ -2,7 +2,8 @@ import { useMutation } from "@tanstack/react-query";
 import { apiClient } from "../api/http-client";
 import { toast } from "sonner";
 
-interface PresentationInput {
+export interface PresentationInput {
+    repository_id: string;
     title: string;
     client_name: string;
     industry: string;
@@ -13,6 +14,7 @@ interface PresentationInput {
     preferred_slide_types?: string[];
     tone?: string;
     additional_context?: string;
+    sales_stage?: string;
 }
 
 interface BlobResponse {
@@ -23,7 +25,6 @@ interface BlobResponse {
 export const useCompletions = (options?: { onSuccess?: () => void }) => {
     const { mutateAsync: generatePresentation, isPending: isGenerating } = useMutation({
         mutationFn: async (input: PresentationInput) => {
-
             const response = await apiClient.request<BlobResponse>('/completions/generate-presentation', {
                 method: 'POST',
                 headers: {
@@ -54,7 +55,7 @@ export const useCompletions = (options?: { onSuccess?: () => void }) => {
             return { success: true, filename };
         },
         onMutate: () => {
-            toast.loading('Generating presentation...');
+            // toast.loading('Generating presentation...');
         },
         onError: (error) => {
             toast.error('Failed to generate presentation');

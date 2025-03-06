@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { RepositoriesList, Repository } from "@/components/repositories/RepositoriesList";
+import { RepositoriesList } from "@/components/repositories/RepositoriesList";
 import { SlideThumbnailList } from "@/components/slides/SlideThumbnailList";
+import { useRepositories, PresentationMetadata } from "@/hooks/useRepositories";
 
-export const SlideMetadataView = () => {
-    const [selectedRepo, setSelectedRepo] = useState<Repository | null>(null);
+type Tab = "metadata" | "upload" | "generate";
+
+export const SlideMetadataView = ({ setSelectedTab }: { setSelectedTab: (tab: Tab) => void }) => {
+    const { repositories, isLoadingRepositories, errorRepositories } = useRepositories();
+    const [selectedRepo, setSelectedRepo] = useState<PresentationMetadata | null>(null);
     
     const handleBackToRepos = () => {
       setSelectedRepo(null);
@@ -14,7 +18,7 @@ export const SlideMetadataView = () => {
         {selectedRepo ? (
           <SlideThumbnailList repository={selectedRepo} onBack={handleBackToRepos} />
         ) : (
-          <RepositoriesList onSelectRepo={setSelectedRepo} />
+          <RepositoriesList onSelectRepo={setSelectedRepo} repositories={repositories} isLoadingRepositories={isLoadingRepositories} errorRepositories={errorRepositories} setSelectedTab={setSelectedTab}/>
         )}
       </div>
     );

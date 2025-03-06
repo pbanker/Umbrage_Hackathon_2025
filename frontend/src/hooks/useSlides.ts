@@ -2,30 +2,30 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "../api/http-client";
 import { toast } from "sonner"
 
-interface SlideMetadata {
-    id: number;
+export interface SlideMetadata {
+    id: string;
     title?: string;
     category?: string;
     slide_type?: string;
     purpose?: string;
     tags?: string[];
-    audience?: string;
-    sales_stage?: string;
+    // audience?: string;
+    // sales_stage?: string;
     image_path?: string;
 }
 
-interface SlideMetadataUpdate {
+export interface SlideMetadataUpdate {
     title?: string;
     category?: string;
     slide_type?: string;
     purpose?: string;
     tags?: string[];
-    audience?: string;
-    sales_stage?: string;
+    // audience?: string;
+    // sales_stage?: string;
 }
 
 export const useSlides = (
-    presentationId: number,
+    presentationId: string,
     options?: { onSuccess?: () => void }
 ) => {
     const queryClient = useQueryClient();
@@ -33,10 +33,12 @@ export const useSlides = (
     const { data: slides, isLoading: isLoadingSlides, error: errorSlides } = useQuery({
         queryKey: ['slides', presentationId],
         queryFn: () => apiClient.get<SlideMetadata[]>(`/slides/${presentationId}`),
+        staleTime: 1000 * 60 * 5,
+        refetchOnMount: false
     });
 
     const { mutateAsync: updateSlideMetadata, isPending: isUpdatingSlideMetadata } = useMutation({
-        mutationFn: ({ slideId, metadata }: { slideId: number, metadata: SlideMetadataUpdate }) =>
+        mutationFn: ({ slideId, metadata }: { slideId: string, metadata: SlideMetadataUpdate }) =>
             apiClient.put<SlideMetadata>(`/slides/metadata/${slideId}`, metadata),
         onMutate: async ({ slideId, metadata }) => {
             await queryClient.cancelQueries({ queryKey: ['slides', presentationId] });
