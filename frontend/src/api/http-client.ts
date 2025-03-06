@@ -1,4 +1,6 @@
-const baseUrl = '/api/v1';
+import { serverUrl } from '@/const';  
+
+const baseUrl = `${serverUrl}/api/v1`;
 
 interface RequestOptions extends RequestInit {
   headers?: Record<string, string>;
@@ -78,6 +80,13 @@ class APIClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(data),
+    });
+  }
+
+  postFormData<T>(url: string, formData: FormData): Promise<T> {
+    return this.request<T>(url, {
+      method: 'POST',
+      body: formData,
     });
   }
 

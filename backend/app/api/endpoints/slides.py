@@ -16,7 +16,11 @@ async def get_slides(
 ):
     """Get all slide metadata for a presentation"""
     presentation = db.query(PresentationMetadata).filter(PresentationMetadata.id == presentation_id).first()
-    return presentation.slides
+    return [schemas.SlideMetadata.model_validate({
+        'id': slide.id,
+        'slide_id': slide.id,
+        **slide.__dict__
+    }) for slide in presentation.slides]
 
 
 
@@ -41,6 +45,6 @@ async def update_slide_metadata(
         "sales_stage": slide.sales_stage
     }
     stringified_metadata = json.dumps(semantic_content)
-    slide.embedding = get_embedding(stringified_metadata)
+    slide.embedding = await get_embedding(stringified_metadata)
     db.commit()
     return slide

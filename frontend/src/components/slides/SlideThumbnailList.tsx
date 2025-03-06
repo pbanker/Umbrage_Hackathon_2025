@@ -3,105 +3,24 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Repository } from '../repositories/RepositoriesList';
-
-interface Slide {
-  id: string;
-  imagePath: string;
-  metaData: {
-    title: string;
-    category: string;
-    slide_type: string;
-    purpose: string;
-    tags: string[];
-    audience: string;
-    sales_stage: string;
-  };
-}
+import { PresentationMetadata } from '@/hooks/useRepositories';
+import { useSlides, SlideMetadata } from '@/hooks/useSlides';
+import { serverUrl } from '@/const';
 
 interface SlideThumbnailListProps {
-  repository: Repository;
+  repository: PresentationMetadata;
   onBack: () => void;
 }
 
-const dummyThumbnailPath = "https://i0.wp.com/www.bishoprook.com/wp-content/uploads/2021/05/placeholder-image-gray-16x9-1.png?fit=640%2C360&ssl=1";
-
 export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListProps) => {
-    // Sample data (would come from props in real implementation)
-    const [slides, setSlides] = useState<Slide[]>([
-      {
-        id: "slide1",
-        imagePath: dummyThumbnailPath,
-        metaData: {
-          title: "Project Timeline",
-          category: "timelines",
-          slide_type: "gantt-chart",
-          purpose: "to show the timeline of the project",
-          tags: ["timeline", "project", "schedule"],
-          audience: "engineering team",
-          sales_stage: "discovery"
-        }
-      },
-      {
-        id: "slide2",
-        imagePath: dummyThumbnailPath,
-        metaData: {
-          title: "Feature Roadmap",
-          category: "roadmaps",
-          slide_type: "flowchart",
-          purpose: "to outline upcoming feature releases",
-          tags: ["roadmap", "features", "planning"],
-          audience: "product team",
-          sales_stage: "planning"
-        }
-      },
-      {
-        id: "slide3",
-        imagePath: dummyThumbnailPath,
-        metaData: {
-          title: "Market Analysis",
-          category: "analytics",
-          slide_type: "bar-chart",
-          purpose: "to analyze market trends",
-          tags: ["market", "analysis", "trends"],
-          audience: "executive team",
-          sales_stage: "proposal"
-        }
-      },
-      {
-        id: "slide4",
-        imagePath: dummyThumbnailPath,
-        metaData: {
-          title: "Budget Overview",
-          category: "finance",
-          slide_type: "pie-chart",
-          purpose: "to present budget allocation",
-          tags: ["budget", "finance", "allocation"],
-          audience: "stakeholders",
-          sales_stage: "negotiation"
-        }
-      },
-      {
-        id: "slide5",
-        imagePath: dummyThumbnailPath,
-        metaData: {
-          title: "Team Structure",
-          category: "organization",
-          slide_type: "org-chart",
-          purpose: "to visualize team hierarchy",
-          tags: ["team", "structure", "organization"],
-          audience: "new hires",
-          sales_stage: "onboarding"
-        }
-      }
-    ]);
+  const { slides, updateSlideMetadata } = useSlides(repository.id);
   
-    const [selectedSlide, setSelectedSlide] = useState<Slide | null>(null);
+    const [selectedSlide, setSelectedSlide] = useState<SlideMetadata | null>(null);
     const [isEditing, setIsEditing] = useState(false);
-    const [editedMetaData, setEditedMetaData] = useState<Slide['metaData'] | null>(null);
+    const [editedMetaData, setEditedMetaData] = useState<Omit<SlideMetadata, 'id' | 'image_path'> | null>(null);
   
     // Handle slide selection
-    const handleSelectSlide = (slide: Slide) => {
+    const handleSelectSlide = (slide: SlideMetadata) => {
       setSelectedSlide(slide);
       setEditedMetaData(null);
       setIsEditing(false);
@@ -110,29 +29,32 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
     // Handle metadata field change
     const handleMetaDataChange = (field: string, value: string) => {
       setIsEditing(true);
-      setEditedMetaData({
-        ...editedMetaData || selectedSlide.metaData,
-        [field]: value
-      });
+      if (selectedSlide) {
+        const { id, image_path, ...metadata } = selectedSlide;
+        setEditedMetaData({
+          ...editedMetaData || metadata,
+          [field]: value
+        });
+      }
     };
   
     // Handle tag input (comma-separated)
-    const handleTagsChange = (tagsString) => {
+    const handleTagsChange = (tagsString: string) => {
       const tagsArray = tagsString.split(',').map(tag => tag.trim()).filter(tag => tag);
-      handleMetaDataChange('tags', tagsArray);
+      handleMetaDataChange('tags', tagsArray.join(','));
     };
   
     // Save metadata changes
     const handleSave = () => {
-      const updatedSlides = slides.map(slide => 
-        slide.id === selectedSlide.id ? 
-          {...slide, metaData: editedMetaData} : 
-          slide
-      );
-      setSlides(updatedSlides);
-      setSelectedSlide({...selectedSlide, metaData: editedMetaData});
-      setIsEditing(false);
-      setEditedMetaData(null);
+      if (selectedSlide && editedMetaData) {
+        updateSlideMetadata({
+          slideId: selectedSlide.id,
+          metadata: editedMetaData
+        });
+        setSelectedSlide({...selectedSlide, ...editedMetaData});
+        setIsEditing(false);
+        setEditedMetaData(null);
+      }
     };
   
     // Cancel metadata changes
@@ -152,10 +74,10 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
               </svg>
               <span className="sr-only">Back</span>
             </Button>
-            <h2 className="text-xl font-semibold tracking-tight">{repository.name}</h2>
+            <h2 className="text-xl font-semibold tracking-tight">{repository.title}</h2>
           </div>
           <div className="text-sm text-gray-500">
-            {repository.slideCount} slides
+            {repository.number_of_slides} slides
           </div>
         </div>
   
@@ -167,20 +89,20 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
               <CardTitle className="text-lg font-semibold tracking-tight">Slide Thumbnails</CardTitle>
             </CardHeader>
             <div className="space-y-4 mt-2">
-              {slides.map((slide) => (
+              {slides.map((slide, index) => (
                 <div 
                   key={slide.id}
                   className={`relative cursor-pointer border-2 rounded-md overflow-hidden ${selectedSlide?.id === slide.id ? 'border-blue-500' : 'border-gray-200'}`}
                   onClick={() => handleSelectSlide(slide)}
                 >
                   <img 
-                    src={slide.imagePath} 
-                    alt={slide.metaData.title}
+                    src={`${serverUrl}/${slide.image_path}`} 
+                    alt={slide.title}
                     className="w-full h-auto"
                   />
                   <div className="absolute bottom-0 left-0 right-0 bg-white text-black p-2">
-                    <p className="text-black text-sm font-semibold truncate">{slide.metaData.title}</p>
-                    <p className="text-gray-800 text-xs">ID: {slide.id}</p>
+                    <p className="text-black text-sm font-semibold truncate">{slide.title}</p>
+                    <p className="text-gray-800 text-xs">{index + 1} of {repository.number_of_slides}</p>
                   </div>
                 </div>
               ))}
@@ -200,7 +122,7 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
                       <Label htmlFor="title">Title</Label>
                       <Input
                         id="title"
-                        value={editedMetaData?.title || selectedSlide.metaData.title}
+                        value={editedMetaData?.title || selectedSlide.title}
                         onChange={(e) => handleMetaDataChange('title', e.target.value)}
                       />
                     </div>
@@ -209,7 +131,7 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
                       <Label htmlFor="category">Category</Label>
                       <Input
                         id="category"
-                        value={editedMetaData?.category || selectedSlide.metaData.category}
+                        value={editedMetaData?.category || selectedSlide.category}
                         onChange={(e) => handleMetaDataChange('category', e.target.value)}
                       />
                     </div>
@@ -218,7 +140,7 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
                       <Label htmlFor="slideType">Slide Type</Label>
                       <Input
                         id="slideType"
-                        value={editedMetaData?.slide_type || selectedSlide.metaData.slide_type}
+                        value={editedMetaData?.slide_type || selectedSlide.slide_type}
                         onChange={(e) => handleMetaDataChange('slide_type', e.target.value)}
                       />
                     </div>
@@ -227,7 +149,7 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
                       <Label htmlFor="purpose">Purpose</Label>
                       <Input
                         id="purpose"
-                        value={editedMetaData?.purpose || selectedSlide.metaData.purpose}
+                        value={editedMetaData?.purpose || selectedSlide.purpose}
                         onChange={(e) => handleMetaDataChange('purpose', e.target.value)}
                       />
                     </div>
@@ -236,28 +158,11 @@ export const SlideThumbnailList = ({ repository, onBack }: SlideThumbnailListPro
                       <Label htmlFor="tags">Tags (comma-separated)</Label>
                       <Input
                         id="tags"
-                        value={(editedMetaData?.tags || selectedSlide.metaData.tags).join(', ')}
+                        value={editedMetaData?.tags?.toString() || selectedSlide?.tags?.toString() || ''}
                         onChange={(e) => handleTagsChange(e.target.value)}
                       />
                     </div>
                     
-                    <div className="space-y-2">
-                      <Label htmlFor="audience">Audience</Label>
-                      <Input
-                        id="audience"
-                        value={editedMetaData?.audience || selectedSlide.metaData.audience}
-                        onChange={(e) => handleMetaDataChange('audience', e.target.value)}
-                      />
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <Label htmlFor="salesStage">Sales Stage</Label>
-                      <Input
-                        id="salesStage"
-                        value={editedMetaData?.sales_stage || selectedSlide.metaData.sales_stage}
-                        onChange={(e) => handleMetaDataChange('sales_stage', e.target.value)}
-                      />
-                    </div>
                   </div>
                   
                   {isEditing && (

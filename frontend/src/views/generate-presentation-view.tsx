@@ -5,10 +5,34 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useCompletions, PresentationInput } from "@/hooks/useCompletions";
+import { useRepositories } from "@/hooks/useRepositories";
 
 export const GeneratePresentationView = () => {
-    const [formData, setFormData] = useState({
+    const { generatePresentation, isGenerating } = useCompletions({
+        onSuccess: () => {
+            setFormData({
+                repository_id: '',
+                title: '',
+                client_name: '',
+                industry: '',
+                description: '',
+                target_audience: '',
+                key_messages: [''],
+                num_slides: 5,
+                preferred_slide_types: [],
+                tone: '',
+                additional_context: '',
+                sales_stage: ''
+            });
+        }
+    });
+    const { repositories } = useRepositories();
+    const [messageIndex, setMessageIndex] = useState(0);
+
+    const [formData, setFormData] = useState<PresentationInput>({
+      repository_id: '',
       title: '',
       client_name: '',
       industry: '',
@@ -18,27 +42,35 @@ export const GeneratePresentationView = () => {
       num_slides: 5,
       preferred_slide_types: [],
       tone: '',
-      additional_context: ''
+      additional_context: '',
+      sales_stage: ''
     });
     
-    const [isLoading, setIsLoading] = useState(false);
     const [loadingMessage, setLoadingMessage] = useState('');
     
     const loadingMessages = [
-      "Training robots to talk business...",
-      "Convincing algorithms to wear a tie...",
-      "Extracting buzzwords from the cloud...",
-      "Teaching AI the art of persuasion...",
       "Brewing coffee for the algorithm...",
+      "Generating impressive-looking numbers...",
+      "Infusing slides with buzzwords...",
+      "Teaching AI the art of persuasion...",
       "Polishing virtual slides...",
-      "Calculating optimal pizza charts...",
       "Negotiating with pixels...",
       "Generating corporate jargon...",
-      "Adding strategic clipart..."
-    ];
+      "Adding strategic clipart...",
+      "Teaching AI to avoid comic sans...",
+      "Giving PowerPoint a pep talk...",
+      "Sprinkling in AI magic...",
+      "Coaching neural networks on elevator pitches...",
+      "Making data look important...",
+      "Practicing AI handshakes...",
+      "Adding just the right amount of graph...",
+      "Teaching AI to make eye contact...",
+      "Finding the perfect stock photos...",
+      "Rehearsing AI presentation skills...",
+  ];
     
     // Handle form input changes
-    const handleInputChange = (field, value) => {
+    const handleInputChange = (field: keyof PresentationInput, value: string | string[]) => {
       setFormData({
         ...formData,
         [field]: value
@@ -46,7 +78,7 @@ export const GeneratePresentationView = () => {
     };
     
     // Handle key messages changes
-    const handleKeyMessageChange = (index, value) => {
+    const handleKeyMessageChange = (index: number, value: string) => {
       const updatedMessages = [...formData.key_messages];
       updatedMessages[index] = value;
       
@@ -59,7 +91,7 @@ export const GeneratePresentationView = () => {
     };
     
     // Remove a key message field
-    const removeKeyMessage = (index) => {
+    const removeKeyMessage = (index: number) => {
       if (formData.key_messages.length > 1) {
         const updatedMessages = formData.key_messages.filter((_, i) => i !== index);
         handleInputChange('key_messages', updatedMessages);
@@ -67,8 +99,8 @@ export const GeneratePresentationView = () => {
     };
     
     // Handle slide type selection
-    const handleSlideTypeChange = (type) => {
-      const updatedTypes = [...formData.preferred_slide_types];
+    const handleSlideTypeChange = (type: string) => {
+      const updatedTypes = [...(formData.preferred_slide_types || [])];
       
       if (updatedTypes.includes(type)) {
         // Remove if already exists
@@ -81,31 +113,33 @@ export const GeneratePresentationView = () => {
       
       handleInputChange('preferred_slide_types', updatedTypes);
     };
-    
-    // Generate presentation
-    const generatePresentation = () => {
-      setIsLoading(true);
+
+    useEffect(() => {
+      let messageInterval: NodeJS.Timeout;
       
-      // Start cycling through loading messages
-      let messageIndex = 0;
-      setLoadingMessage(loadingMessages[messageIndex]);
-      
-      const messageInterval = setInterval(() => {
-        messageIndex = (messageIndex + 1) % loadingMessages.length;
-        setLoadingMessage(loadingMessages[messageIndex]);
-      }, 2000);
-      
-      // Simulate API call
-      setTimeout(() => {
-        clearInterval(messageInterval);
-        setIsLoading(false);
-        // Here you would normally handle the API response
-      }, 8000);
-    };
+      if (isGenerating) {
+          // Start with initial message
+          setLoadingMessage(loadingMessages[messageIndex]);
+          
+          messageInterval = setInterval(() => {
+              setMessageIndex(prevIndex => (prevIndex + 1) % loadingMessages.length);
+              setLoadingMessage(loadingMessages[messageIndex]);
+          }, 2000);
+      } else {
+          setLoadingMessage('');
+          setMessageIndex(0); // Reset message index when not generating
+      }
+
+      return () => {
+          if (messageInterval) {
+              clearInterval(messageInterval);
+          }
+      };
+    }, [isGenerating, messageIndex]);
     
     const slideTypes = [
-      "title", "agenda", "bullet-points", "comparison", "quote",
-      "chart", "timeline", "image-focused", "team", "call-to-action"
+      "Intro", "About", "Process", "Timeline", "Case Study",
+      "Product Roadmap", "Product Definition", "Our Methodology", "Development", "Team", "Strategy", "Capabilities", "Conclusion", "Call to Action", 
     ];
     
     const toneOptions = [
@@ -119,8 +153,18 @@ export const GeneratePresentationView = () => {
     ];
     
     const industryOptions = [
-      "Technology", "Healthcare", "Finance", "Education",
+      "Technology", "Oil & Gas", "Healthcare", "Finance", "Education",
       "Retail", "Manufacturing", "Media", "Consulting", "Other"
+    ];
+
+    const salesStageOptions = [
+      "Discovery",
+      "Qualification",
+      "Solution Development",
+      "Proposal",
+      "Negotiation",
+      "Closing",
+      "Post-Sale"
     ];
   
     return (
@@ -129,12 +173,12 @@ export const GeneratePresentationView = () => {
           <CardTitle className="text-2xl font-semibold tracking-tight">Generate AI Presentation</CardTitle>
         </CardHeader>
         
-        {isLoading ? (
+        {isGenerating ? (
           <div className="flex flex-col items-center justify-center py-16">
-            <div className="relative mb-6">
-              <Loader2 className="h-12 w-12 animate-spin text-blue-500" />
+            <div className="flex flex-col items-center gap-4">
+              <Loader2 className="animate-spin h-40 w-40" color="gray" strokeWidth={1}/>
+              <span className="text-gray-800 text-xl mb-2">Generating your presentation</span>
             </div>
-            <p className="text-lg font-medium text-gray-700 mb-2">Generating your presentation</p>
             <p className="text-gray-500">{loadingMessage}</p>
           </div>
         ) : (
@@ -146,7 +190,7 @@ export const GeneratePresentationView = () => {
                   id="title"
                   value={formData.title}
                   onChange={(e) => handleInputChange('title', e.target.value)}
-                  placeholder="e.g., Q1 Sales Results"
+                  placeholder="e.g., Sales Slides Repository"
                 />
               </div>
               
@@ -161,7 +205,7 @@ export const GeneratePresentationView = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-4 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="industry">Industry</Label>
                 <Select 
@@ -191,6 +235,40 @@ export const GeneratePresentationView = () => {
                   <SelectContent>
                     {audienceOptions.map((audience) => (
                       <SelectItem key={audience} value={audience}>{audience}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="sales_stage">Sales Stage</Label>
+                <Select 
+                  value={formData.sales_stage} 
+                  onValueChange={(value) => handleInputChange('sales_stage', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select sales stage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {salesStageOptions.map((stage) => (
+                      <SelectItem key={stage} value={stage}>{stage}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tone">Presentation Tone</Label>
+                <Select 
+                  value={formData.tone} 
+                  onValueChange={(value) => handleInputChange('tone', value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select tone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {toneOptions.map((tone) => (
+                      <SelectItem key={tone} value={tone}>{tone.charAt(0).toUpperCase() + tone.slice(1)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -240,44 +318,13 @@ export const GeneratePresentationView = () => {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="num_slides">Number of Slides</Label>
-                <Input
-                  id="num_slides"
-                  type="number"
-                  value={formData.num_slides}
-                  onChange={(e) => handleInputChange('num_slides', parseInt(e.target.value) || 1)}
-                  min="1"
-                  max="20"
-                />
-              </div>
-              
-              <div className="space-y-2">
-                <Label htmlFor="tone">Presentation Tone</Label>
-                <Select 
-                  value={formData.tone} 
-                  onValueChange={(value) => handleInputChange('tone', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select tone" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {toneOptions.map((tone) => (
-                      <SelectItem key={tone} value={tone}>{tone.charAt(0).toUpperCase() + tone.slice(1)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            
             <div className="space-y-2">
               <Label>Preferred Slide Types</Label>
               <div className="flex flex-wrap gap-2 mt-2">
                 {slideTypes.map((type) => (
                   <Button
                     key={type}
-                    variant={formData.preferred_slide_types.includes(type) ? "default" : "outline"}
+                    variant={(formData.preferred_slide_types ?? []).includes(type) ? "default" : "outline"}
                     size="sm"
                     onClick={() => handleSlideTypeChange(type)}
                     className="capitalize"
@@ -299,9 +346,40 @@ export const GeneratePresentationView = () => {
               />
             </div>
             
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="repository_id">Repository</Label>
+                <Select 
+                value={formData.repository_id} 
+                onValueChange={(value) => handleInputChange('repository_id', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  {repositories?.map((repo) => (
+                    <SelectItem key={repo.id} value={repo.id}>{repo.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+                <Label htmlFor="num_slides">Number of Slides</Label>
+                <Input
+                  id="num_slides"
+                  type="number"
+                  value={formData.num_slides}
+                  onChange={(e) => handleInputChange('num_slides', e.target.value || "1")}
+                  min="1"
+                  max="20"
+                  className="w-24"
+                />
+              </div>
+            </div>
             <div className="pt-4">
               <Button 
-                onClick={generatePresentation}
+                onClick={() => generatePresentation(formData)}
                 className="w-full py-6 text-lg"
               >
                 Generate Presentation

@@ -41,6 +41,10 @@ def construct_presentation(template_path, output_path, slide_data):
     template_pres = Presentation(template_path)
     logger.info(f"Loaded template with {len(template_pres.slides)} slides")
     
+    # Add validation for slide indices
+    max_template_slides = len(template_pres.slides)
+    logger.info(f"Template has {max_template_slides} slides available")
+    
     # Create a new presentation to hold the copied slides
     new_pres = Presentation()
     
@@ -57,6 +61,12 @@ def construct_presentation(template_path, output_path, slide_data):
     for slide_item in slide_data:
         slide_id = slide_item["slide_id"]
         content = slide_item["content"]
+        
+        # Validate slide_id
+        if slide_id >= max_template_slides:
+            logger.warning(f"Slide ID {slide_id} is out of range. Using fallback slide 0")
+            slide_id = 0  # Use first slide as fallback
+            
         logger.info(f"Processing slide {slide_id}")
         
         # Get template slide
