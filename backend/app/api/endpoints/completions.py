@@ -1,11 +1,12 @@
+from collections import defaultdict
 import os
 import shutil
 from app.schemas import schemas
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database  import get_db
 from app.models.models import PresentationMetadata, SlideShape
-from app.utils.pptx_construction import generate_presentation_outline, modify_ppt_text, getOriginals, generate_slide_content_remix, construct_presentation_remix, find_matching_slides_remix
+from app.utils.pptx_construction import generate_presentation_outline, generate_slide_content_remix, construct_presentation_remix, find_matching_slides_remix
 from pathlib import Path
 from datetime import datetime
 import logging
@@ -68,20 +69,28 @@ async def generate_presentation(
 )
         else:
             original_slides_content = []  # Return an empty list if no matches
+        slides = defaultdict(lambda: {"slideNumber": None, "text": {}})
 
+        for index, (slide_number, shape_type, text) in enumerate(original_slides_content, start=1):
+            if text.strip():  # Remove empty strings
+                slides[slide_number]["slideNumber"] = slide_number
+                slides[slide_number]["text"][f"section{index}"] = text  
 
+        # Convert defaultdict to a regular dictionary
+        slides = list(slides.values())
+        logger.info(f'Original slides content: {original_slides_content}')
         logger.debug(f"Found {len(matched_slides)} matching slides")
         logger.debug(f"Matched slides: {[{'id': s.id, 'title': s.title, 'type': s.slide_type} for s in matched_slides]}")
         
         # 3. Generate content for selected slides
         logger.info("Generating slide content...")
-        slide_content = await generate_slide_content_remix(matched_slides, outline, input_data, original_slides_content)
+        slide_content = await generate_slide_content_remix(slides, outline, input_data )
         logger.debug(f"Generated content: {json.dumps(slide_content, indent=2)}")
         
         # 4. Create output directory if it doesn't exist
         output_dir = Path("presentation_output")
         output_dir.mkdir(exist_ok=True)
-        
+
         # 5. Generate output path
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = output_dir / f"presentation_{timestamp}.pptx"
@@ -104,7 +113,7 @@ async def generate_presentation(
         
         # return the file with appropriate headers
         return FileResponse(
-            path=str(output_path),
+            path=str(result),
             filename=f"{input_data.title.replace(' ', '_')}.pptx",
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
@@ -113,58 +122,10 @@ async def generate_presentation(
         logger.error(f"Error generating presentation: {str(e)}", exc_info=True)
         raise
     
-@router.post("/completions/modify_pptx_slide")
-async def modify_ppt(
-    file: UploadFile = File(...),
-    replacements: str = Form(...),
-    output_path: str = Form(...)
-):
-    """
-    API Endpoint to modify PowerPoint text.
-    Requires a file upload and JSON-formatted replacements.
-    """
-    if not file.filename.endswith(".pptx"):
-        raise HTTPException(status_code=400, detail="Only PPTX files are supported.")
-    
-    UPLOAD_DIR = "uploads"
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    result = None
-
-    try:
-        replacements_dict = json.loads(replacements)
-        result = modify_ppt_text(file_path, replacements_dict, output_path)
-
-    except Exception as e:
-         return HTTPException(status_code=500, detail=str(e))
-         
-    finally:
-        os.remove(file_path)
-        try:
-            os.rmdir(UPLOAD_DIR) 
-        except OSError:
-            pass 
-
-    return result
-
 
 @router.post("/duplicate-pptx/")
 async def process_pptx():
-    """
-    Process a PPTX file to create a new PPTX with duplicated slides.
-    Uses hardcoded paths and settings:
-    - Input path: backend/slides_repository
-    - Output directory: presentation_output
-    - Duplication interval: 2 (every other slide); **Could add any logic to this step i.e. content swap
-    
-    Returns:
-        FileResponse: The processed PPTX file
-    """
-    # Hardcoded values with correct path
-    file_path = Path("slides_repository")  # Relative to backend directory
+    file_path = Path("slides_repository")
     duplication_interval = 2
     try:
         # Find the first PPTX file in the source directory
@@ -185,7 +146,7 @@ async def process_pptx():
         # First, copy the entire file
         shutil.copy2(source_file, output_path)
         
-        # Then open the copied file and modify it
+        # Open the copied file and modify it
         prs = Presentation(output_path)
         
         # Create list of slide indices to keep (only every other slide)
