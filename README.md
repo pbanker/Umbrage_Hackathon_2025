@@ -50,7 +50,7 @@ This streamlines what was previously a time-consuming, manual process into an ef
 - SQLAlchemy
 - FastAPI
 
-### Basic Architecture Diagram
+### App Flow
 ![Screenshot 2025-03-04 at 5 58 17 PM](https://github.com/user-attachments/assets/d8f8c4c6-c56a-40cb-a338-1aff1ace48b1)
 
 
