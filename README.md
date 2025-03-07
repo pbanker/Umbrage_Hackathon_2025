@@ -1,4 +1,4 @@
-# AI Sales Presentation Generator
+# AI Sales Presentation Generator POC
 
 A pitch deck generation system that leverages AI to build customized PowerPoint presentations from a curated slide repository. This tool revolutionizes sales presentation creation by automatically selecting and adapting relevant slides based on specific user requirements.
 
@@ -91,15 +91,14 @@ http://localhost:5173/
    - System generates an outline and matches appropriate slides
    - Download the generated presentation
 
-## Demo
+## Rough Demo (output needs to be improved)
 
-[Link to live demo - Coming soon]
+https://github.com/user-attachments/assets/0c15c214-9f00-40c0-a2f5-e985add9b5fd
 
-### Screenshots
-[Coming soon]
 
 ## Future Improvements
 
+- Better prompts for more consistent, pertinent content output
 - Slide component registry for categorizing slide content. Will allow for accurate creation/modification of complex content such as charts, tables, timelines, etc
 - Slide component parsing for breaking down and mapping slide content to component types
 - Better/automated metadata generation via Computer Vision Models
