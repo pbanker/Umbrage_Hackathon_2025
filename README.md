@@ -65,7 +65,6 @@ cd umbrage_hackathon_2025
 
 3. Run the backend
 ```bash
-cd backend
 docker compose up -d --build
 ```
 4. Run the frontend
