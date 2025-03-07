@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from app.schemas import schemas
 from app.database import get_db
-from app.utils.pptx_parsing import process_powerpoint_repository
+from app.utils.pptx_parsing import process_powerpoint_repository, retrieve_shape_and_content
 from app.models.models import PresentationMetadata
 
 router = APIRouter()
@@ -37,8 +37,14 @@ async def upload_repository(
     for metadata in slide_metadata_objects:
         metadata.presentation_id = presentation.id
         db.add(metadata)
+
+    shapes_and_content = retrieve_shape_and_content(storage_path)
+    db.add_all(shapes_and_content)
+    db.flush()
     
     db.commit()
+
+
     
     return {
         "message": f"{len(slide_metadata_objects)} slides processed successfully",

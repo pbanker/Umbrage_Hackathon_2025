@@ -20,3 +20,10 @@ __pycache__/
 backend/slides_repository/
 .DS_Store
 **/.DS_Store
+
+
+# logs
+backend/logs/
+
+#Images
+backend/slides_repository/

@@ -3,7 +3,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER, MSO_SHAPE_TYPE
 from datetime import datetime
 from typing import Union, Tuple, List, Dict, BinaryIO
 from sqlalchemy.orm import Session
-from app.models.models import SlideMetadata
+from app.models.models import SlideMetadata, SlideShape
 import shutil
 from pathlib import Path
 import json
@@ -89,7 +89,8 @@ async def process_powerpoint_repository(
             sales_stage=None,  # To be filled by user/AI later
             content_mapping=_create_content_mapping(slide),
             embedding=embedding,
-            image_path=image_path  # Add the image path
+            image_path=image_path,  # Add the image path
+            slide_number= slide_idx + 1
         )
         
         slide_metadata_objects.append(metadata)
@@ -445,3 +446,31 @@ def _save_slides_as_images(pptx_path: str) -> list[str]:
         except Exception as e:
             print(f"Error during conversion: {str(e)}")
             raise RuntimeError(f"Failed to process slides: {str(e)}")
+        
+
+def retrieve_shape_and_content(pptx_storage_path: str):
+  
+    prs = Presentation(pptx_storage_path)
+
+    shapes_to_insert = []  # all my shapes
+    for slide_index, slide in enumerate(prs.slides, start=1):
+      for shape_index, shape in enumerate(slide.shapes, start=1):
+      
+          shape_type_id = shape.shape_type  # Gets shape type ID
+          shape_type_name = MSO_SHAPE_TYPE(shape_type_id).name if shape_type_id in MSO_SHAPE_TYPE.__members__.values() else f"Unknown ({shape_type_id})"
+
+          if hasattr(shape, "text_frame") and shape.text_frame is not None:
+              for paragraph in shape.text_frame.paragraphs:
+                  full_text = paragraph.text.strip()  # Extract full text from paragraph
+                  print(f"Slide {slide_index}, Shape {shape_index} [{shape_type_name}]: {full_text}")
+                  new_shape = SlideShape(
+                      slide_metadata_id=slide_index,
+                      shape_index=shape_index,
+                      shape_type=shape_type_name,
+                      text_content=full_text
+                     )
+                  shapes_to_insert.append(new_shape)
+    if shapes_to_insert:
+      return shapes_to_insert
+    else:
+        return None
