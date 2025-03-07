@@ -1,4 +1,5 @@
 from datetime import datetime
+import time
 from http.client import HTTPException
 import os
 import shutil
@@ -14,11 +15,9 @@ from app.schemas import schemas
 from app.models.models import SlideMetadata
 from app.utils.openai import get_completion, get_formatted_completion, get_embedding
 from sqlalchemy.orm import Session
-from collections import defaultdict
 import json
 import numpy as np
 import logging
-import io
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -132,76 +131,6 @@ async def find_matching_slides_remix(
     
     return matched_slides
 
-
-def modify_ppt_text(file_path, replacements, output_path):
-    """
-    Modifies text in a PowerPoint file while preserving formatting and handling multi-run text issues.
-
-    :param file_path: Path to the original PowerPoint file.
-    :param replacements: Dictionary mapping old text to new text.
-    :param output_path: Path to save the modified PowerPoint.
-    :return: Success or error message.
-    """
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-
-    prs = Presentation(file_path)
-    modified = False  # Track if changes were made
-
-    # merger everything we got back into a single dictionary
-    merged_replacements = {}
-
-    for item in replacements:
-        content = item.get("content", {})
-        if "original" in content and "modified" in content:
-            merged_replacements[content["original"]] = content["modified"]
-
-    print('--------------------------------------------')
-    print(f"replacements: {merged_replacements}")
-    print('--------------------------------------------')
-    
-    for slide_index, slide in enumerate(prs.slides, start=1):
-        for shape_index, shape in enumerate(slide.shapes, start=1):
-        
-            if hasattr(shape, "text_frame") and shape.text_frame is not None:
-                for paragraph in shape.text_frame.paragraphs:
-                    full_text = paragraph.text.strip()  # Extract full text from paragraph
-
-                    # Check if the entire text matches a replacement
-                    if full_text in merged_replacements:
-                        new_text = merged_replacements[full_text]  # Get new text
-                        runs = paragraph.runs  # Get original text runs                      
-
-                        if len(runs) == 1:
-                            print(f"Replacing text: {runs[0].text} with -> {new_text}")
-                            # Simple case: Only one run
-                            runs[0].text = new_text
-                        else:
-                            # Complex case: Multiple runs
-                            first_run = runs[0]  # Store first run for formatting reference
-
-                            # Clear all runs except the first one
-                            print("more complex replacement with multiple runs")
-                            print('clear all runs except the first one')
-                            for run in runs:
-                                print(f"Run Text Before: {run.text}")
-                                run.text = ""
-
-                            # Apply new text while keeping first run’s formatting
-                            first_run.text = new_text
-                            print(f'applied the new text {new_text}')
-                            print('while keeping first run’s formatting')
-                            
-                        modified = True 
-
-    if modified:
-        prs.save(output_path)
-        return {"message": f"Modified PowerPoint saved as: {output_path}"}
-    else:
-        prs.save(output_path)
-        return {"message": "No matching text found to replace."}
-    
-
 def getOriginals(file_path, slide_ids):
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
@@ -216,121 +145,181 @@ def getOriginals(file_path, slide_ids):
 
 
 async def generate_slide_content_remix(
-    slides: List[SlideMetadata],
+    slides,
     outline: List[schemas.SlideOutline],
     presentation_input: schemas.PresentationInput,
-    original_slides_content,
     max_retries: int = 3
 ) -> List[dict]:
-    """Generate customized content for each slide based on the outline"""
+    """Generate customized content for each slide based on the outline."""
     slide_content_list = []
-    
-    system_prompt = """You are an expert presentation content writer. 
-    Your task is to modify only the text content of a PowerPoint slide while preserving its exact structure.
-    
-    Rules:
-    1. Only modify text content where appropriate 
-    2. if replacement text is too long, shorten it to about the same number of characters as the original
-    3. Keep text concise and impactful
-    4. return the modified text as the original in a key value pair like {"original":"what you generated"}
-    5. Please only use the same slide once
-    """
-    grouped_slides = defaultdict(list)
 
-    for slide_id, shape_type, text_content in original_slides_content:
-        grouped_slides[slide_id].append({
-            "shape_type": shape_type,
-            "text_content": text_content
-        })
+    system_prompt = """You are an expert presentation content writer. 
+    Your task is to refine and enhance the provided slide text while maintaining clarity, professionalism, and conciseness.
+
+    ### Rules:
+    1. Ensure the revised text keeps the **same meaning** as the original.
+    2. If the original text is too long, **shorten it while preserving its key message**.
+    3. The output should be a **JSON object where the original text is the key and the rewritten text is the value**.
+    """
+
+    # Convert slide data into replacement text format
+    replacement_list = []
+    for slide in slides:
+        replacement_obj = {"slideNumber": slide["slideNumber"]}
+        text_replacements = {}
         
-    for slide, section in zip(slides, outline):
+        replacement_counter = 1  # Reset counter for each slide
+        
+        for section_text in slide["text"].values():
+            key = f"replacement{replacement_counter}"
+            text_replacements[key] = section_text
+            replacement_counter += 1
+
+        replacement_obj["text"] = text_replacements
+        replacement_list.append(replacement_obj)
+
+    for obj_index, obj in enumerate(replacement_list, start=1):
+        print(f"🔹 Processing Slide {obj['slideNumber']}")
+
         for attempt in range(max_retries):
+            prompt = f"""
+            Your task is to **rewrite the text provided while keeping its meaning intact but have fun with it!
+            Don't be afraid to be creative and add a bit of flair to the text to make it more engaging and interesting and 
+            different from the original text.**.
+            **.
+            use this outline as a guide:
+            {outline}
+
+            and include this data it is about the team, client etc:
+            {presentation_input}
+
+            ### **Original Slide Content:**
+            {json.dumps(obj, indent=4)}
+
+            ### **Output Format (JSON)**
+            Return a JSON object where:
+            - **Each key is the original text**.
+            - **Each value is the rewritten text**.
+
+            Example:
+            ```json
+            {{
+                "Original Text 1": "Rewritten Text 1",
+                "Original Text 2": "Rewritten Text 2"
+            }}
+            ```
+            """
             try:
-                prompt = f"""Generate new content for this slide with the following context:
-                Slide Type: {slide.slide_type}
-                Purpose: {section.description}
-                Target Audience: {presentation_input.target_audience}
-                Tone: {presentation_input.tone or 'Professional'}
-                Slide Number: {slide.slide_number}
-                
-                Original slide content:
-                {grouped_slides}
-                
-                Return only the original text and the modified text as a key value pair in a JSON object, no other text.
-                The Slide Number corresponds to first item in the original slide content tuples
-                """
-                
                 modified_content = await get_completion(
                     prompt=prompt,
                     system_prompt=system_prompt
                 )
-                
-                logger.debug(f"OpenAI response for slide {slide.id} (attempt {attempt + 1}):\n{modified_content}")
-                
-                # Parse the response as JSON
-                content_dict = json.loads(modified_content)
+            except Exception as e:
+                print(f"❌ API request failed on attempt {attempt + 1} for slide {obj['slideNumber']}: {e}")
+                continue  # Retry
+
+            if not modified_content:
+                print(f"⚠️ Attempt {attempt + 1} failed for slide {obj['slideNumber']}: Empty response.")
+                time.sleep(2)  
+                continue  
+            
+            # Remove Markdown-style formatting from GPT response
+            response = modified_content.strip("```").strip()
+            try:
+                parsed_response = json.loads(response)  
+
                 slide_content_list.append({
-                    "slide_id": slide.id,
-                    "content": content_dict
+                    "slide_id": obj["slideNumber"],  
+                    "content": parsed_response
                 })
-                break  # Success, exit retry loop
-                
+
+                print(f"✅ Success for slide {obj['slideNumber']}")
+                break  # Exit retry loop on success
+
             except json.JSONDecodeError as e:
-                logger.warning(f"Attempt {attempt + 1} failed for slide {slide.id}: {e}")
-                logger.warning(f"Raw response:\n{modified_content}")
-                
-                if attempt == max_retries - 1:  # Last attempt failed
-                    logger.error(f"All {max_retries} attempts failed for slide {slide.id}")
-                    raise ValueError(f"Failed to generate valid JSON for slide {slide.id} after {max_retries} attempts")
-    
+                print(f"❌ Attempt {attempt + 1} failed for slide {obj['slideNumber']}: {e}")
+                print("Raw response:", response)
+                time.sleep(2)  # Wait before retrying
+
     return slide_content_list
-
-
+  
 def construct_presentation_remix(original_slides, output_path, slide_data):
     """Copy selected slides from template and modify content"""
 
-    path_to_copy_project = copyOG(original_slides, slide_data)
-    return modify_ppt_text(path_to_copy_project, slide_data, output_path) 
+    path_to_copy_project = copyOG_remix_remix(original_slides, slide_data)
+    print (path_to_copy_project)
+    return path_to_copy_project
 
-def copyOG(original_slides, replacements):
 
-    merged_replacements = defaultdict(dict)
-    slide_ids = set()
 
-    for item in replacements:
-        slide_id = item.get("slide_id")
-        content = item.get("content", {})
+def copyOG_remix_remix(original_slides, replacements):
 
-        if isinstance(content, dict):
-            merged_replacements.update(content)
-            slide_ids.add(slide_id)
-
-    slide_ids = sorted(slide_ids)  # Convert to sorted list if needed
-    merged_replacements = dict(merged_replacements)  # Convert back to dictionary
-
-    
+    slide_ids = sorted(item["slide_id"] for item in replacements if "slide_id" in item)
     output_dir = Path("presentation_output")
     output_dir.mkdir(exist_ok=True)
-    
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_filename = f"duplicated_{timestamp}.pptx"
     output_path = output_dir / output_filename
-    
-    # First, copy the entire file
-    shutil.copy2(original_slides, output_path)
-    
-    # Then open the copied file and modify it
-    prs = Presentation(output_path)
-    
-    
-    # Remove slides that aren't in our keep list
-    # We need to remove from end to start to avoid index shifting
-    zero_based_slide_ids = [i - 1 for i in slide_ids]  # Convert to 0-based indexing
 
-    for i in range(len(prs.slides) - 1, -1, -1): 
-        if i not in zero_based_slide_ids:  
-            xml_slides = prs.slides._sldIdLst
-            xml_slides.remove(xml_slides[i])
+    # Copy
+    outputPath = shutil.copy2(original_slides, output_path)
+
+    # Modify
+    newOutputPath = modify_ppt_text_remix(outputPath, replacements)
+    prs = Presentation(newOutputPath)
+
+    #Removal
+    keep_slide_ids = {i - 1 for i in slide_ids}  # Adjust for zero-based index
+    slides_to_remove = [i for i in range(len(prs.slides)) if i not in keep_slide_ids]
+    xml_slides = prs.slides._sldIdLst
+
+    for slide_index in reversed(slides_to_remove):  
+        xml_slides.remove(xml_slides[slide_index])  
+    # And Done
+    prs.save(newOutputPath)
+    return str(newOutputPath)
+
+
+def modify_ppt_text_remix(file_path, replacements):
     
-    prs.save(output_path)
-    return str(output_path)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    prs = Presentation(file_path)
+
+    merged_content = {}
+
+    for slide in replacements:
+        merged_content.update(slide["content"])
+    
+    for slide in prs.slides:
+      for shape in slide.shapes:
+            if hasattr(shape, "text_frame") and shape.text_frame is not None:
+                for paragraph in shape.text_frame.paragraphs:
+                    full_text = paragraph.text.strip() 
+
+                    if full_text in merged_content:
+                        new_text = merged_content[full_text]  
+                        runs = paragraph.runs                   
+
+                        if len(runs) == 1:
+                            print(f"Replacing text: {runs[0].text} with -> {new_text}")
+                            runs[0].text = new_text
+                        else:
+                            first_run = runs[0] 
+                            for run in runs:
+                                print(f"Run Text Before: {run.text}")
+                                run.text = ""
+                            first_run.text = new_text if new_text.strip() else " "  
+
+
+    file_path = Path(file_path)  # Ensure it's a Path object
+    final_path = file_path.parent / "final_presentation.pptx"  # Keep same folder, change filename
+
+    prs.save(final_path)
+    return final_path
+
+
+    # final_path = file_path.with_stem(file_path.stem + "_final")                        
+    # prs.save(final_path)
+    # return (final_path)
