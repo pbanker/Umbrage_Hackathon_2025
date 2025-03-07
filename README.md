@@ -82,7 +82,7 @@ http://localhost:5173/
 ## Usage Guide
 
 1. **Repository Setup**
-   - Upload template PowerPoint files via the UI
+   - Upload template PowerPoint files via the UI -- *NOTE: Make sure your pptx file does not have sections*
    - System automatically processes slides and generates metadata
    - Optionally edit metadata for better matching
 
