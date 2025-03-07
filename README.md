@@ -1,6 +1,6 @@
 # AI Sales Presentation Generator
 
-An intelligent pitch deck generation system that leverages AI to build customized PowerPoint presentations from a curated slide repository. This tool revolutionizes sales presentation creation by automatically selecting and adapting relevant slides based on specific user requirements.
+A pitch deck generation system that leverages AI to build customized PowerPoint presentations from a curated slide repository. This tool revolutionizes sales presentation creation by automatically selecting and adapting relevant slides based on specific user requirements.
 
 ## Problem Statement
 Sales teams face two major challenges when creating pitch decks: writing compelling content from scratch and navigating extensive slide libraries to find appropriate templates. Our solution addresses both issues by:
